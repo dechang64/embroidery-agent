@@ -9,6 +9,7 @@ Connects to Rust backend via gRPC/REST for:
   - Federated learning (multi-workshop)
 """
 
+from .agent import EmbroideryAgent, GenerationResult
 from .image_processor import ImageProcessor, ProcessedImage, StitchType, EmbroideryColor, ImageRegion
 from .stitch_planner import StitchPlanner, StitchPlan, StitchBlock, StitchPoint
 from .pattern_generator import PatternGenerator, ExportResult
@@ -20,6 +21,7 @@ from .fl.aggregation import FedAvgAggregator
 
 __version__ = "0.2.0"
 __all__ = [
+    "EmbroideryAgent", "GenerationResult",
     "ImageProcessor", "ProcessedImage", "StitchType", "EmbroideryColor", "ImageRegion",
     "StitchPlanner", "StitchPlan", "StitchBlock", "StitchPoint",
     "PatternGenerator", "ExportResult",
