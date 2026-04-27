@@ -97,15 +97,19 @@ if mode == "Generate":
             st.image(uploaded, caption="Original", use_column_width=True)
 
         with st.spinner("Generating embroidery pattern..."):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                img_path = os.path.join(tmpdir, "input.png")
-                with open(img_path, "wb") as f:
-                    f.write(uploaded.read())
+            # Persistent output dir — NOT a TemporaryDirectory context manager.
+            # Old code deleted all files when the `with` block exited.
+            output_dir = os.path.join(_tmpdir, "output")
+            os.makedirs(output_dir, exist_ok=True)
 
-                result = st.session_state.agent.generate(img_path, output_dir=tmpdir, certify=True)
+            img_path = os.path.join(output_dir, "input.png")
+            with open(img_path, "wb") as f:
+                f.write(uploaded.read())
+
+            result = st.session_state.agent.generate(img_path, output_dir=output_dir, certify=True)
 
         with col2:
-            svg_path = os.path.join(os.path.dirname(img_path), result.preview_svg)
+            svg_path = result.preview_svg
             if os.path.exists(svg_path):
                 st.image(svg_path, caption="Stitch Preview", use_column_width=True)
 
@@ -118,10 +122,20 @@ if mode == "Generate":
         if result.certificate:
             st.info(f"🔒 Certified: {result.certificate.certificate_id[:8]}...")
 
-        for exp in result.exports:
-            if os.path.exists(exp.file_path):
-                with open(exp.file_path, "rb") as f:
-                    st.download_button(f"Download {exp.format.upper()}", f, file_name=f"design.{exp.format}")
+        # Download buttons
+        if result.exports:
+            dl_cols = st.columns(len(result.exports))
+            for i, exp in enumerate(result.exports):
+                if os.path.exists(exp.file_path):
+                    with dl_cols[i]:
+                        with open(exp.file_path, "rb") as f:
+                            st.download_button(
+                                label=f"⬇️ {exp.format.upper()} ({exp.stitch_count} stitches)",
+                                data=f,
+                                file_name=f"design.{exp.format}",
+                                mime="application/octet-stream",
+                                use_container_width=True,
+                            )
 
 # --- Federated Learning Mode ---
 elif mode == "Federated Learning":

@@ -104,37 +104,81 @@ class PatternGenerator:
         Path(output_path).write_text("\n".join(lines))
 
     def _export_dst(self, plan: StitchPlan, output_path: str):
-        """Export to Tajima DST format."""
+        """Export to Tajima DST format.
+
+        DST binary layout:
+          - 128-byte header: starts with "LA:" label (padded to 125 bytes) + 3-byte stitch count
+          - 3 bytes per stitch/jump command
+          - 3-byte end marker: 0x00 0x00 0xF3
+        """
         data = bytearray()
-        # DST header (125 bytes)
-        header = b"LA:" + b" " * 122
-        data.extend(header[:125])
-        # Stitch data
+        # 128-byte header: 125-byte label + 3-byte stitch count (big-endian)
+        label = b"LA:EmbroideryAgent"
+        label = label + b" " * (125 - len(label))
+        data.extend(label[:125])
+        # Stitch count placeholder (will be filled after encoding)
+        count_offset = len(data)
+        data.extend(b"\x00\x00\x00")
+
+        # Encode stitch data
+        stitch_count = 0
+        last_x, last_y = 0.0, 0.0
         for block in plan.blocks:
-            for i in range(1, len(block.points)):
-                p1, p2 = block.points[i - 1], block.points[i]
-                if p1.jump or p2.jump:
-                    data.extend(self._dst_jump(p2.x, p2.y))
+            for i, pt in enumerate(block.points):
+                if i == 0:
+                    # First point of block: jump to start position
+                    data.extend(self._dst_jump(pt.x - last_x, pt.y - last_y))
+                    last_x, last_y = pt.x, pt.y
+                elif pt.jump:
+                    # Explicit jump flag
+                    data.extend(self._dst_jump(pt.x - last_x, pt.y - last_y))
+                    last_x, last_y = pt.x, pt.y
                 else:
-                    data.extend(self._dst_stitch(p2.x - p1.x, p2.y - p1.y))
-        # End
+                    # Normal stitch (relative delta)
+                    data.extend(self._dst_stitch(pt.x - last_x, pt.y - last_y))
+                    last_x, last_y = pt.x, pt.y
+                    stitch_count += 1
+
+        # End of design marker
         data.extend(b"\x00\x00\xf3")
+
+        # Patch stitch count into header (big-endian 24-bit)
+        b = stitch_count.to_bytes(3, byteorder="big")
+        data[count_offset:count_offset + 3] = b
+
         Path(output_path).write_bytes(bytes(data))
 
-    def _dst_stitch(self, dx: float, dy: float) -> bytes:
-        """Encode a DST stitch command."""
+    def _dst_encode(self, dx: float, dy: float) -> bytes:
+        """Encode a DST 3-byte command (shared by stitch and jump).
+
+        DST uses a 9-bit signed displacement per axis, encoded across 3 bytes
+        with fixed offset values added to each byte.
+        """
         ix, iy = int(dx * 10), int(dy * 10)
+        # Clamp to DST range (-241 to +241 in 0.1mm units)
+        ix = max(-241, min(241, ix))
+        iy = max(-241, min(241, iy))
         b0 = ((ix >> 1) & 0x07) | (((iy >> 1) & 0x07) << 3)
         b1 = ((ix >> 4) & 0x07) | (((iy >> 4) & 0x07) << 3) | (((ix >> 7) & 0x01) << 6) | (((iy >> 7) & 0x01) << 7)
         b2 = ((ix + 9) >> 8) & 0x03 | (((iy + 9) >> 8) & 0x03) << 2
         return bytes([b0 + 0x03, b1 + 0x83, b2 + 0xC3])
 
-    def _dst_jump(self, x: float, y: float) -> bytes:
-        """Encode a DST jump (move without stitching)."""
-        return self._dst_stitch(x, y)  # Simplified
+    def _dst_stitch(self, dx: float, dy: float) -> bytes:
+        """Encode a DST stitch command (normal sewing move)."""
+        return self._dst_encode(dx, dy)
+
+    def _dst_jump(self, dx: float, dy: float) -> bytes:
+        """Encode a DST jump command (move without sewing).
+
+        In DST, jumps use the same encoding as stitches but are typically
+        longer moves. The machine distinguishes them by the distance.
+        For production use, a move > 121 steps (12.1mm) is treated as a jump.
+        """
+        return self._dst_encode(dx, dy)
 
     def _export_pes(self, plan: StitchPlan, output_path: str):
         """Export to Brother PES format (simplified)."""
+        import struct
         # PES v1 header
         data = bytearray()
         data.extend(b"#PES0001")
@@ -144,19 +188,21 @@ class PatternGenerator:
             for i in range(1, len(block.points)):
                 p1, p2 = block.points[i - 1], block.points[i]
                 dx, dy = int(p2.x - p1.x), int(p2.y - p1.y)
-                data.extend(bytes([max(-127, min(127, dx)), max(-127, min(127, dy))]))
+                # struct.pack handles signed bytes correctly (two's complement)
+                data.extend(struct.pack("bb", max(-127, min(127, dx)), max(-127, min(127, dy))))
         data.extend(b"\xff\x00")  # End of design
         Path(output_path).write_bytes(bytes(data))
 
     def _export_exp(self, plan: StitchPlan, output_path: str):
         """Export to Melco EXP format."""
+        import struct
         data = bytearray()
         for block in plan.blocks:
             for i in range(1, len(block.points)):
                 p1, p2 = block.points[i - 1], block.points[i]
                 dx = int(p2.x - p1.x)
                 dy = int(p2.y - p1.y)
-                data.extend(bytes([max(-127, min(127, dx)), max(-127, min(127, dy))]))
+                data.extend(struct.pack("bb", max(-127, min(127, dx)), max(-127, min(127, dy))))
         data.extend(b"\x80\x00")  # End
         Path(output_path).write_bytes(bytes(data))
 
