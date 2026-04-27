@@ -75,13 +75,15 @@ st.sidebar.title("🧵 Embroidery Agent v0.2.0")
 mode = st.sidebar.radio("Mode", ["Generate", "Federated Learning", "Audit Chain", "Pattern Library"])
 
 # --- Initialize session state ---
+if "_tmpdir" not in st.session_state:
+    st.session_state._tmpdir = tempfile.mkdtemp()
+_tmpdir = st.session_state._tmpdir
+
 if "agent" not in st.session_state:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        st.session_state.agent = EmbroideryAgent(audit_db=os.path.join(tmpdir, "audit.db"),
-                                                  pattern_db=os.path.join(tmpdir, "patterns.json"))
+    st.session_state.agent = EmbroideryAgent(audit_db=os.path.join(_tmpdir, "audit.db"),
+                                              pattern_db=os.path.join(_tmpdir, "patterns.json"))
 if "audit" not in st.session_state:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        st.session_state.audit = AuditCertifier(db_path=os.path.join(tmpdir, "audit.db"))
+    st.session_state.audit = AuditCertifier(db_path=os.path.join(_tmpdir, "audit.db"))
 
 # --- Generate Mode ---
 if mode == "Generate":
