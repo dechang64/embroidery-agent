@@ -50,7 +50,8 @@ class EmbroideryAgent:
         self.processor = ImageProcessor()
         self.planner = StitchPlanner()
         self.generator = PatternGenerator()
-        self.fingerprint = StyleFingerprint(persist_path=pattern_db)
+        self.fingerprint = StyleFingerprint()
+        self.pattern_library = PatternLibrary(persist_path=pattern_db)
         self.audit = AuditCertifier(db_path=audit_db)
         self.export_formats = ["pes", "dst", "svg"]
 
@@ -71,9 +72,9 @@ class EmbroideryAgent:
 
         # 2. Style fingerprinting
         try:
-            feature = self.fingerprint.extract(image)
+            feature = self.fingerprint.compute(image)
             style_hash = StyleFingerprint.style_hash(feature)
-            similar = self.fingerprint.search(feature, top_k=3)
+            similar = self.pattern_library.search(feature, top_k=3)
             similar_patterns = [{"pattern_id": s[0], "similarity": float(s[1])} for s in similar]
         except Exception:
             style_hash = ""
