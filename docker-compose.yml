@@ -1,0 +1,10 @@
+services:
+  embroidery-agent:
+    build: .
+    ports:
+      - "50051:50051"
+      - "8080:8080"
+      - "8501:8501"
+    environment:
+      - RUST_LOG=info
+    restart: unless-stopped

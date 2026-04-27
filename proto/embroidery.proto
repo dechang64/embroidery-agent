@@ -1,0 +1,168 @@
+syntax = "proto3";
+package embroidery;
+
+service EmbroideryService {
+  rpc ComputeFingerprint(FingerprintRequest) returns (FingerprintResponse);
+  rpc SearchPatterns(SearchRequest) returns (SearchResponse);
+  rpc AddPattern(AddPatternRequest) returns (AddPatternResponse);
+  rpc PlanStitches(PlanRequest) returns (PlanResponse);
+  rpc ExportPattern(ExportRequest) returns (ExportResponse);
+  rpc AddAuditEntry(AuditEntryRequest) returns (AuditEntryResponse);
+  rpc VerifyChain(VerifyRequest) returns (VerifyResponse);
+  rpc GetCertificate(CertRequest) returns (CertResponse);
+  rpc RegisterClient(RegisterRequest) returns (RegisterResponse);
+  rpc SubmitUpdate(UpdateRequest) returns (UpdateResponse);
+  rpc GetGlobalModel(ModelRequest) returns (ModelResponse);
+  rpc StartRound(RoundRequest) returns (RoundResponse);
+  rpc AggregateRound(AggregateRequest) returns (AggregateResponse);
+}
+
+message FingerprintRequest {
+  string pattern_id = 1;
+  bytes image_data = 2;
+}
+
+message FingerprintResponse {
+  string pattern_id = 1;
+  repeated float feature_vector = 2;
+  string style_hash = 3;
+  int64 compute_time_ms = 4;
+}
+
+message SearchRequest {
+  repeated float query_vector = 1;
+  int32 top_k = 2;
+}
+
+message SearchResponse {
+  message Match {
+    string pattern_id = 1;
+    string name = 2;
+    float similarity = 3;
+    repeated string stitch_types = 4;
+  }
+  repeated Match matches = 1;
+}
+
+message AddPatternRequest {
+  string pattern_id = 1;
+  string name = 2;
+  repeated float feature_vector = 3;
+  repeated string stitch_types = 4;
+  int32 color_count = 5;
+  int32 stitch_count = 6;
+}
+
+message AddPatternResponse { bool success = 1; string pattern_id = 2; }
+
+message PlanRequest {
+  message Region {
+    int32 id = 1;
+    message Pt { float x = 1; float y = 2; }
+    repeated Pt contour = 2;
+    int32 area = 3;
+    repeated int32 bbox = 4;
+    string stitch_type = 5;
+    int32 priority = 6;
+  }
+  message Color { string name = 1; int32 r = 2; int32 g = 3; int32 b = 4; }
+  repeated Region regions = 1;
+  repeated Color colors = 2;
+}
+
+message PlanResponse {
+  message StitchBlock {
+    string stitch_type = 1;
+    string color_hex = 2;
+    message Pt { float x = 1; float y = 2; bool jump = 3; bool trim = 4; }
+    repeated Pt points = 3;
+    int32 stitch_count = 4;
+  }
+  repeated StitchBlock blocks = 1;
+  int32 total_stitches = 2;
+  float design_width_mm = 3;
+  float design_height_mm = 4;
+}
+
+message ExportRequest {
+  PlanResponse plan = 1;
+  string format = 2;
+  string output_path = 3;
+}
+
+message ExportResponse {
+  bool success = 1;
+  string file_path = 2;
+  int32 stitch_count = 3;
+  int32 color_count = 4;
+}
+
+message AuditEntryRequest {
+  string operation = 1;
+  string client_id = 2;
+  string details = 3;
+}
+
+message AuditEntryResponse {
+  bool success = 1;
+  int64 index = 2;
+  string hash = 3;
+}
+
+message VerifyRequest {}
+
+message VerifyResponse {
+  bool valid = 1;
+  int64 chain_length = 2;
+}
+
+message CertRequest {
+  string design_hash = 1;
+  string designer_id = 2;
+}
+
+message CertResponse {
+  bool success = 1;
+  string certificate_id = 2;
+  string design_hash = 3;
+  string created_at = 4;
+}
+
+message RegisterRequest {
+  string client_id = 1;
+  string workshop_name = 2;
+  string specialty = 3;
+}
+
+message RegisterResponse { bool success = 1; string client_id = 2; }
+
+message UpdateRequest {
+  string client_id = 1;
+  int64 round_id = 2;
+  int32 num_samples = 3;
+  float local_loss = 4;
+  repeated float weights = 6;
+  string stitch_type = 7;
+}
+
+message UpdateResponse { bool accepted = 1; }
+
+message ModelRequest { string client_id = 1; }
+
+message ModelResponse {
+  int64 round_id = 1;
+  repeated float weights = 2;
+  float global_loss = 3;
+}
+
+message RoundRequest { int64 round_num = 1; }
+
+message RoundResponse { bool success = 1; int64 round_id = 2; }
+
+message AggregateRequest { int64 round_id = 1; }
+
+message AggregateResponse {
+  bool success = 1;
+  float global_loss = 2;
+  int32 participating_clients = 3;
+}
