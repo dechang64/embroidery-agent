@@ -3,9 +3,8 @@ Image processing module for Embroidery Agent.
 
 Handles:
     - Image preprocessing (resize, normalize)
-    - Edge detection (Canny, Sobel)
-    - Color segmentation (K-means)
-    - Region extraction (connected components, contour detection)
+    - Color quantization (fast median-cut via PIL)
+    - Region extraction (connected components)
     - Stitch type assignment based on region characteristics
 """
 
@@ -19,15 +18,15 @@ import colorsys
 
 class StitchType(Enum):
     """Embroidery stitch types — 9 categories from traditional Chinese embroidery."""
-    RUNNING = "running"           # 平针 — outlines, details
-    SATIN = "satin"               # 缎纹针 — borders, text
-    FILL = "fill"                 # 填充针 — solid areas
-    CHAIN = "chain"               # 链式针 — decorative outlines
-    ZIGZAG = "zigzag"             # 锯齿针 — decorative borders
-    CROSS = "cross"               # 十字针 — counted embroidery
-    FRENCH_KNOT = "french_knot"   # 法式结 — dots, accents
-    TATAMI = "tatami"             # 榻榻米针 — dense fill patterns
-    SEED = "seed"                 # 散点针 — scattered texture
+    RUNNING = "running"
+    SATIN = "satin"
+    FILL = "fill"
+    CHAIN = "chain"
+    ZIGZAG = "zigzag"
+    CROSS = "cross"
+    FRENCH_KNOT = "french_knot"
+    TATAMI = "tatami"
+    SEED = "seed"
 
 
 @dataclass
@@ -60,33 +59,46 @@ class ImageRegion:
 class ProcessedImage:
     """Result of image processing pipeline."""
     original_size: Tuple[int, int]
-    regions: List[ImageRegion]
-    color_palette: List[EmbroideryColor]
+    regions: List[ImageRegion] = field(default_factory=list)
+    color_palette: List[EmbroideryColor] = field(default_factory=list)
     edge_map: Optional[np.ndarray] = None
     segment_map: Optional[np.ndarray] = None
+    quantized_image: Optional[Image.Image] = None  # color-quantized PIL Image
 
 
 class ImageProcessor:
-    """Processes input images into embroidery-ready regions."""
+    """Processes images for embroidery pattern generation."""
 
     def __init__(self, max_colors: int = 8, min_region_area: int = 100):
         self.max_colors = max_colors
         self.min_region_area = min_region_area
 
     def process(self, image: Image.Image) -> ProcessedImage:
-        """Full processing pipeline: segment → extract regions → assign stitch types."""
+        """Full processing pipeline: quantize → extract regions → assign stitch types."""
         img_array = np.array(image.convert("RGB"))
         h, w = img_array.shape[:2]
 
-        # Color segmentation via K-means
-        palette, segment_map = self._kmeans_segment(img_array)
+        # Fast color quantization using PIL median-cut
+        quantized = image.quantize(colors=self.max_colors, method=Image.Quantize.MEDIANCUT)
+        segment_map = np.array(quantized, dtype=np.int32)
+
+        # Build palette from quantized image
+        raw_palette = quantized.getpalette()  # 768 RGB values (256 * 3)
+        # Find actual colors used in the image
+        used_indices = np.unique(segment_map).tolist()
+        palette = []
+        idx_to_palette = {}  # segment_map value → palette index
+        for pi, idx in enumerate(used_indices):
+            r, g, b = raw_palette[idx*3], raw_palette[idx*3+1], raw_palette[idx*3+2]
+            palette.append(EmbroideryColor(name=self._color_name((r, g, b)), rgb=(r, g, b)))
+            idx_to_palette[idx] = pi
 
         # Edge detection
         gray = np.array(image.convert("L"))
         edge_map = self._detect_edges(gray)
 
-        # Extract regions from segments (connected components per color)
-        regions = self._extract_regions(segment_map, palette, (w, h))
+        # Extract regions from segments
+        regions = self._extract_regions(segment_map, palette, idx_to_palette, (w, h))
 
         # Assign stitch types
         regions = self._assign_stitch_types(regions, (w, h))
@@ -97,58 +109,21 @@ class ImageProcessor:
             color_palette=palette,
             edge_map=edge_map,
             segment_map=segment_map,
+            quantized_image=quantized.convert("RGB"),
         )
-
-    def _kmeans_segment(self, img: np.ndarray) -> Tuple[List[EmbroideryColor], np.ndarray]:
-        """K-means color segmentation — memory-efficient chunked version."""
-        pixels = img.reshape(-1, 3).astype(np.float32)
-        n = len(pixels)
-
-        # Initialize centroids via K-means++ style
-        rng = np.random.RandomState(42)
-        indices = rng.choice(n, min(self.max_colors, n), replace=False)
-        centroids = pixels[indices].copy()
-
-        for _ in range(20):
-            # Chunked distance computation to avoid O(N*K*3) memory blowup
-            labels = np.empty(n, dtype=np.int32)
-            chunk_size = 50000
-            for start in range(0, n, chunk_size):
-                end = min(start + chunk_size, n)
-                chunk = pixels[start:end]
-                dists = np.linalg.norm(chunk[:, None] - centroids[None], axis=2)
-                labels[start:end] = np.argmin(dists, axis=1)
-
-            # Update centroids
-            new_centroids = np.array([
-                pixels[labels == k].mean(axis=0) if (labels == k).any() else centroids[k]
-                for k in range(len(centroids))
-            ])
-            if np.allclose(centroids, new_centroids, atol=1e-3):
-                break
-            centroids = new_centroids
-
-        # Build palette
-        palette = []
-        for c in centroids:
-            rgb = tuple(int(max(0, min(255, x))) for x in c)
-            name = self._color_name(rgb)
-            palette.append(EmbroideryColor(name=name, rgb=rgb))
-
-        segment_map = labels.reshape(img.shape[:2])
-        return palette, segment_map
 
     def _detect_edges(self, gray: np.ndarray) -> np.ndarray:
         """Sobel edge detection."""
+        from scipy.ndimage import convolve
         gx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
         gy = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float32)
-        from scipy.ndimage import convolve
         sx = convolve(gray.astype(np.float32), gx)
         sy = convolve(gray.astype(np.float32), gy)
         magnitude = np.sqrt(sx ** 2 + sy ** 2)
         return (magnitude > np.percentile(magnitude, 85)).astype(np.uint8)
 
     def _extract_regions(self, segment_map: np.ndarray, palette: List[EmbroideryColor],
+                         idx_to_palette: Dict[int, int],
                          size: Tuple[int, int]) -> List[ImageRegion]:
         """Extract connected regions from segment map using scipy.ndimage.label."""
         from scipy.ndimage import label as ndlabel
@@ -157,13 +132,13 @@ class ImageProcessor:
         h, w = segment_map.shape
         region_id = 0
 
-        for label_idx in range(len(palette)):
-            color_mask = segment_map == label_idx
+        for seg_idx, pal_idx in idx_to_palette.items():
+            color_mask = segment_map == seg_idx
             if color_mask.sum() < self.min_region_area:
                 continue
 
             # Skip near-white background (avg brightness > 240)
-            rgb = palette[label_idx].rgb
+            rgb = palette[pal_idx].rgb
             if sum(rgb) / 3 > 240:
                 continue
 
@@ -192,7 +167,7 @@ class ImageProcessor:
                     bbox=(x1, y1, x2, y2),
                     area=area,
                     centroid=(cx, cy),
-                    color=palette[label_idx],
+                    color=palette[pal_idx],
                     contour=contour,
                     mask=cropped_mask,
                 )

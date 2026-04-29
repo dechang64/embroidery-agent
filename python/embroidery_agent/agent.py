@@ -1,10 +1,7 @@
 """
 Main Embroidery Agent — orchestrates the full pipeline.
 
-Pipeline: Image → DINOv2 Fingerprint → Pattern Search → Process →
-          Plan Stitches → Export Files → Audit Certify
-
-Connects to Rust backend via gRPC/REST for fingerprinting, audit, and federated learning.
+Pipeline: Image → Quantize → Region Extract → Plan Stitches → Export → Preview → Certify
 """
 
 from pathlib import Path
@@ -58,7 +55,7 @@ class EmbroideryAgent:
 
     def generate(self, image_path: str, output_dir: str = "./output",
                  name: Optional[str] = None, certify: bool = True) -> GenerationResult:
-        """Full pipeline: image → stitches → export → certify."""
+        """Full pipeline: image → stitches → export → preview → certify."""
         import time
         start = time.time()
 
@@ -84,15 +81,19 @@ class EmbroideryAgent:
         # 3. Plan stitches
         plan = self.planner.plan(processed.regions, processed.color_palette)
 
-        # 4. Export
+        # 4. Export machine files
         exports = self.generator.export_multi_format(plan, base_path, self.export_formats)
-        preview_path = f"{base_path}_preview.svg"
-        self.generator.generate_preview_svg(plan, preview_path, regions=processed.regions)
-        # Also generate PNG preview (st.image() doesn't support SVG)
-        preview_png_path = f"{base_path}_preview.png"
-        self.generator.generate_preview_png(plan, preview_png_path, regions=processed.regions)
 
-        # 5. Audit certification
+        # 5. Generate previews
+        preview_svg_path = f"{base_path}_preview.svg"
+        self.generator.generate_preview_svg(plan, preview_svg_path)
+
+        preview_png_path = f"{base_path}_preview.png"
+        self.generator.generate_preview_png(plan, preview_png_path,
+                                           regions=processed.regions,
+                                           processed=processed)
+
+        # 6. Audit certification
         certificate = None
         if certify:
             design_hash = style_hash or self._hash_file(image_path)
@@ -107,8 +108,8 @@ class EmbroideryAgent:
 
         return GenerationResult(
             input_image=image_path, output_dir=output_dir,
-            stitch_plan=plan, exports=exports, preview_svg=preview_path,
-            preview_png=preview_png_path,
+            stitch_plan=plan, exports=exports,
+            preview_svg=preview_svg_path, preview_png=preview_png_path,
             regions_count=len(processed.regions), processing_time_ms=elapsed_ms,
             certificate=certificate, style_hash=style_hash,
             similar_patterns=similar_patterns,
@@ -126,12 +127,18 @@ class EmbroideryAgent:
         processed = self.processor.process(image)
         plan = self.planner.plan(processed.regions, processed.color_palette)
         exports = self.generator.export_multi_format(plan, base_path, self.export_formats)
-        preview_path = f"{base_path}_preview.svg"
-        self.generator.generate_preview_svg(plan, preview_path, regions=processed.regions)
+
+        preview_svg_path = f"{base_path}_preview.svg"
+        self.generator.generate_preview_svg(plan, preview_svg_path)
+        preview_png_path = f"{base_path}_preview.png"
+        self.generator.generate_preview_png(plan, preview_png_path,
+                                           regions=processed.regions,
+                                           processed=processed)
 
         elapsed_ms = (time.time() - start) * 1000
         return GenerationResult(input_image="<array>", output_dir=output_dir,
-                                stitch_plan=plan, exports=exports, preview_svg=preview_path,
+                                stitch_plan=plan, exports=exports,
+                                preview_svg=preview_svg_path, preview_png=preview_png_path,
                                 regions_count=len(processed.regions), processing_time_ms=elapsed_ms)
 
     @staticmethod
