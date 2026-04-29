@@ -1,23 +1,12 @@
 # embroidery-agent dependencies
-# ─────────────────────────────────────────────
-# Cloud-safe subset (Streamlit Community Cloud compatible)
-# ─────────────────────────────────────────────
 numpy>=1.24.0
 pillow>=10.0.0
+opencv-python-headless>=4.8.0
+scipy>=1.11.0
+scikit-learn>=1.3.0
 streamlit>=1.28.0
+plotly>=5.18.0
 requests>=2.31.0
-
-# Optional — safe to install on Streamlit Cloud (pre-built wheels available)
-opencv-python-headless>=4.8.0        # image_processor: used if available, numpy fallback exists
-scikit-learn>=1.3.0                  # style_fingerprint: used if available, pure-numpy fallback exists
-
-# Plotly is listed but NOT imported by any Python module in this repo
-# plotly>=5.18.0                     # ← remove if not used
-
-# ─────────────────────────────────────────────
-# Local development only (Rust backend)
-# For local dev with gRPC/Rust backend:
-#   pip install grpcio grpcio-tools protobuf
-# Proto stubs (embroidery_pb2.py) are NOT in this repo — generate with:
-#   python -m grpc_tools.protoc -I./proto --python_out=./python --grpc_python_out=./python ./proto/embroidery.proto
-# ─────────────────────────────────────────────
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+protobuf>=4.25.0

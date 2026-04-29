@@ -143,12 +143,8 @@ class PatternGenerator:
         for block in plan.blocks:
             for i in range(1, len(block.points)):
                 p1, p2 = block.points[i - 1], block.points[i]
-                dx = int(p2.x - p1.x)
-                dy = int(p2.y - p1.y)
-                # Clamp to signed byte range [-127, 127], then encode as unsigned byte
-                dx_b = (max(-127, min(127, dx)) + 128) & 0xFF
-                dy_b = (max(-127, min(127, dy)) + 128) & 0xFF
-                data.extend(bytes([dx_b, dy_b]))
+                dx, dy = int(p2.x - p1.x), int(p2.y - p1.y)
+                data.extend(bytes([max(-127, min(127, dx)), max(-127, min(127, dy))]))
         data.extend(b"\xff\x00")  # End of design
         Path(output_path).write_bytes(bytes(data))
 
@@ -160,9 +156,7 @@ class PatternGenerator:
                 p1, p2 = block.points[i - 1], block.points[i]
                 dx = int(p2.x - p1.x)
                 dy = int(p2.y - p1.y)
-                dx_b = (max(-127, min(127, dx)) + 128) & 0xFF
-                dy_b = (max(-127, min(127, dy)) + 128) & 0xFF
-                data.extend(bytes([dx_b, dy_b]))
+                data.extend(bytes([max(-127, min(127, dx)), max(-127, min(127, dy))]))
         data.extend(b"\x80\x00")  # End
         Path(output_path).write_bytes(bytes(data))
 

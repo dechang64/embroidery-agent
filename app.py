@@ -11,6 +11,7 @@ Features:
 
 import sys
 import os
+from io import BytesIO
 
 # Fix path: on Streamlit Cloud, python/ is a subdirectory of the repo root
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,8 +33,10 @@ try:
     )
     from embroidery_agent.fl.client import FederatedClient, WorkshopConfig
     from embroidery_agent.fl.aggregation import FedAvgAggregator
+    _REAL_AGENT = True
 except ImportError:
     # Fallback stubs for Streamlit Cloud if python/ not on path
+    _REAL_AGENT = False
     class EmbroideryAgent:
         def __init__(self, **kwargs): pass
         def generate(self, *a, **kw): return None
@@ -60,7 +63,7 @@ except ImportError:
         def extract(self, *a, **kw): return None
         def search(self, *a, **kw): return []
     class FederatedClient:
-        def train_round(self, *a, **kw): return {"loss": 0.5, "accuracy": 0.7}
+        def run_fed_round(self, *a, **kw): return {"loss": 0.5, "accuracy": 0.7}
     class WorkshopConfig:
         def __init__(self, **kw): pass
     class FedAvgAggregator:
@@ -80,8 +83,10 @@ if "_tmpdir" not in st.session_state:
 _tmpdir = st.session_state._tmpdir
 
 if "agent" not in st.session_state:
-    st.session_state.agent = EmbroideryAgent(audit_db=os.path.join(_tmpdir, "audit.db"),
-                                              pattern_db=os.path.join(_tmpdir, "patterns.json"))
+    st.session_state.agent = EmbroideryAgent(
+        audit_db_path=os.path.join(_tmpdir, "audit.db"),
+        pattern_library_path=os.path.join(_tmpdir, "patterns.json"),
+    )
 if "audit" not in st.session_state:
     st.session_state.audit = AuditCertifier(db_path=os.path.join(_tmpdir, "audit.db"))
 
@@ -94,34 +99,58 @@ if mode == "Generate":
     if uploaded:
         col1, col2 = st.columns(2)
         with col1:
-            st.image(uploaded, caption="Original", use_column_width=True)
+            st.image(uploaded, caption="Original", use_container_width=True)
 
         with st.spinner("Generating embroidery pattern..."):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                img_path = os.path.join(tmpdir, "input.png")
-                with open(img_path, "wb") as f:
-                    f.write(uploaded.read())
+            tmpdir = tempfile.mkdtemp()
+            img_path = os.path.join(tmpdir, "input.png")
+            with open(img_path, "wb") as f:
+                f.write(uploaded.read())
 
+            try:
                 result = st.session_state.agent.generate(img_path, output_dir=tmpdir, certify=True)
+            except Exception as e:
+                st.error(f"Generation failed: {e}")
+                result = None
 
-        with col2:
-            svg_path = os.path.join(os.path.dirname(img_path), result.preview_svg)
-            if os.path.exists(svg_path):
-                st.image(svg_path, caption="Stitch Preview", use_column_width=True)
+        if result is None:
+            st.warning("Agent not available. Running in demo mode.")
+            st.info("Install pyembroidery and svgwrite for full functionality.")
+        else:
+            # Show preview SVG
+            with col2:
+                preview = result.preview_svg
+                if preview and os.path.exists(preview):
+                    st.image(preview, caption="Stitch Preview", use_container_width=True)
+                else:
+                    st.info("Preview not available")
 
-        st.success(f"✅ Generated in {result.processing_time_ms:.0f}ms")
-        col_a, col_b, col_c = st.columns(3)
-        col_a.metric("Regions", result.regions_count)
-        col_b.metric("Stitches", result.stitch_plan.total_stitches)
-        col_c.metric("Colors", result.stitch_plan.total_colors)
+            st.success(f"✅ Generated in {result.processing_time_ms:.0f}ms")
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("Regions", result.regions_count)
+            col_b.metric("Stitches", result.stitch_plan.total_stitches)
+            col_c.metric("Colors", result.stitch_plan.total_colors)
 
-        if result.certificate:
-            st.info(f"🔒 Certified: {result.certificate.certificate_id[:8]}...")
+            if result.certificate:
+                st.info(f"🔒 Certified: {result.certificate.certificate_id[:8]}...")
 
-        for exp in result.exports:
-            if os.path.exists(exp.file_path):
-                with open(exp.file_path, "rb") as f:
-                    st.download_button(f"Download {exp.format.upper()}", f, file_name=f"design.{exp.format}")
+            # Download buttons — read files into memory immediately
+            if result.exports:
+                dl_cols = st.columns(len(result.exports))
+                for i, exp in enumerate(result.exports):
+                    if os.path.exists(exp.file_path):
+                        with open(exp.file_path, "rb") as f:
+                            file_data = f.read()
+                        dl_cols[i].download_button(
+                            f"⬇️ {exp.format.upper()} ({exp.file_size_bytes:,} bytes)",
+                            data=file_data,
+                            file_name=f"design.{exp.format}",
+                            key=f"dl_{exp.format}_{i}",
+                        )
+                    else:
+                        dl_cols[i].warning(f"{exp.format.upper()} file not found")
+            else:
+                st.warning("No export files generated. Check if pyembroidery is installed.")
 
 # --- Federated Learning Mode ---
 elif mode == "Federated Learning":

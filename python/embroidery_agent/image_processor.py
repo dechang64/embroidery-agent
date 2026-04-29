@@ -130,26 +130,13 @@ class ImageProcessor:
         return palette, segment_map
 
     def _detect_edges(self, gray: np.ndarray) -> np.ndarray:
-        """Sobel edge detection — uses opencv if available, falls back to pure numpy."""
-        try:
-            import cv2
-            gray_u8 = gray.astype(np.uint8)
-            sobel_x = cv2.Sobel(gray_u8, cv2.CV_64F, 1, 0, ksize=3)
-            sobel_y = cv2.Sobel(gray_u8, cv2.CV_64F, 0, 1, ksize=3)
-            magnitude = np.sqrt(sobel_x ** 2 + sobel_y ** 2)
-        except ImportError:
-            # Pure numpy Sobel fallback
-            gx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
-            gy = gx.T
-            sx = np.zeros_like(gray, dtype=np.float32)
-            sy = np.zeros_like(gray, dtype=np.float32)
-            gray_f = gray.astype(np.float32)
-            for i in range(1, gray.shape[0] - 1):
-                for j in range(1, gray.shape[1] - 1):
-                    patch = gray_f[i-1:i+2, j-1:j+2]
-                    sx[i, j] = np.sum(patch * gx)
-                    sy[i, j] = np.sum(patch * gy)
-            magnitude = np.sqrt(sx ** 2 + sy ** 2)
+        """Sobel edge detection."""
+        gx = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
+        gy = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float32)
+        from scipy.ndimage import convolve
+        sx = convolve(gray.astype(np.float32), gx)
+        sy = convolve(gray.astype(np.float32), gy)
+        magnitude = np.sqrt(sx ** 2 + sy ** 2)
         return (magnitude > np.percentile(magnitude, 85)).astype(np.uint8)
 
     def _extract_regions(self, segment_map: np.ndarray, palette: List[EmbroideryColor],
@@ -189,22 +176,10 @@ class ImageProcessor:
         return regions
 
     def _extract_contour(self, mask: np.ndarray) -> List[Tuple[int, int]]:
-        """Extract boundary pixels from binary mask — uses opencv if available, falls back to pure numpy."""
-        try:
-            import cv2
-            kernel = np.ones((3, 3), dtype=np.uint8)
-            eroded = cv2.erode(mask.astype(np.uint8), kernel)
-            boundary = mask & ~eroded
-        except ImportError:
-            # Pure numpy erosion: a pixel survives only if all 9 neighbors are 1
-            padded = np.pad(mask.astype(np.uint8), 1, mode='constant', constant_values=0)
-            i_max, j_max = padded.shape
-            eroded = np.zeros_like(padded)
-            for i in range(1, i_max - 1):
-                for j in range(1, j_max - 1):
-                    if padded[i, j] == 1 and np.sum(padded[i-1:i+2, j-1:j+2]) == 9:
-                        eroded[i, j] = 1
-            boundary = mask.astype(bool) & ~eroded[1:-1, 1:-1].astype(bool)
+        """Extract boundary pixels from binary mask."""
+        from scipy.ndimage import binary_erosion
+        eroded = binary_erosion(mask)
+        boundary = mask & ~eroded
         ys, xs = np.where(boundary)
         return list(zip(xs.tolist(), ys.tolist()))
 
