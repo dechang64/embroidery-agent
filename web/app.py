@@ -35,17 +35,13 @@ st.sidebar.title("🧵 Embroidery Agent v0.2.0")
 mode = st.sidebar.radio("Mode", ["Generate", "Federated Learning", "Audit Chain", "Pattern Library"])
 
 # --- Initialize session state ---
-if "_tmpdir" not in st.session_state:
-    st.session_state._tmpdir = tempfile.mkdtemp(prefix="embroidery_")
-_tmpdir = st.session_state._tmpdir
-
 if "agent" not in st.session_state:
-    st.session_state.agent = EmbroideryAgent(
-        audit_db=os.path.join(_tmpdir, "audit.db"),
-        pattern_db=os.path.join(_tmpdir, "patterns.json"),
-    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        st.session_state.agent = EmbroideryAgent(audit_db=os.path.join(tmpdir, "audit.db"),
+                                                  pattern_db=os.path.join(tmpdir, "patterns.json"))
 if "audit" not in st.session_state:
-    st.session_state.audit = AuditCertifier(db_path=os.path.join(_tmpdir, "audit.db"))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        st.session_state.audit = AuditCertifier(db_path=os.path.join(tmpdir, "audit.db"))
 
 # --- Generate Mode ---
 if mode == "Generate":
@@ -59,17 +55,15 @@ if mode == "Generate":
             st.image(uploaded, caption="Original", use_column_width=True)
 
         with st.spinner("Generating embroidery pattern..."):
-            output_dir = os.path.join(_tmpdir, "output")
-            os.makedirs(output_dir, exist_ok=True)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                img_path = os.path.join(tmpdir, "input.png")
+                with open(img_path, "wb") as f:
+                    f.write(uploaded.read())
 
-            img_path = os.path.join(output_dir, "input.png")
-            with open(img_path, "wb") as f:
-                f.write(uploaded.read())
-
-            result = st.session_state.agent.generate(img_path, output_dir=output_dir, certify=True)
+                result = st.session_state.agent.generate(img_path, output_dir=tmpdir, certify=True)
 
         with col2:
-            svg_path = result.preview_svg
+            svg_path = os.path.join(os.path.dirname(img_path), result.preview_svg)
             if os.path.exists(svg_path):
                 st.image(svg_path, caption="Stitch Preview", use_column_width=True)
 
@@ -82,19 +76,10 @@ if mode == "Generate":
         if result.certificate:
             st.info(f"🔒 Certified: {result.certificate.certificate_id[:8]}...")
 
-        if result.exports:
-            dl_cols = st.columns(len(result.exports))
-            for i, exp in enumerate(result.exports):
-                if os.path.exists(exp.file_path):
-                    with dl_cols[i]:
-                        with open(exp.file_path, "rb") as f:
-                            st.download_button(
-                                label=f"⬇️ {exp.format.upper()} ({exp.stitch_count} stitches)",
-                                data=f,
-                                file_name=f"design.{exp.format}",
-                                mime="application/octet-stream",
-                                use_container_width=True,
-                            )
+        for exp in result.exports:
+            if os.path.exists(exp.file_path):
+                with open(exp.file_path, "rb") as f:
+                    st.download_button(f"Download {exp.format.upper()}", f, file_name=f"design.{exp.format}")
 
 # --- Federated Learning Mode ---
 elif mode == "Federated Learning":
