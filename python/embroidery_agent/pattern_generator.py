@@ -6,14 +6,16 @@ Generates standard embroidery machine file formats:
     - DST (Tajima)
     - EXP (Melco)
     - SVG (preview)
+    - PNG (preview for Streamlit)
 """
 
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 from pathlib import Path
+from PIL import Image, ImageDraw
 
-from .image_processor import EmbroideryColor, StitchType
+from .image_processor import EmbroideryColor, StitchType, ImageRegion
 from .stitch_planner import StitchPlan, StitchBlock, StitchPoint
 
 
@@ -75,15 +77,37 @@ class PatternGenerator:
         )
 
     def _export_svg(self, plan: StitchPlan, output_path: str):
-        """Generate SVG preview of stitch plan."""
-        width = max(200, int(plan.design_width_mm * 10) + 20)
-        height = max(200, int(plan.design_height_mm * 10) + 20)
-        scale = min((width - 20) / max(plan.design_width_mm * 10, 1),
-                    (height - 20) / max(plan.design_height_mm * 10, 1))
+        """Generate SVG preview of stitch plan.
+
+        Renders stitch lines with proper coordinate mapping.
+        The stitch points are in pixel coordinates; we map them to SVG
+        coordinates preserving the original aspect ratio.
+        """
+        if not plan.blocks:
+            Path(output_path).write_text('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="100%" height="100%" fill="white"/></svg>')
+            return
+
+        # Compute bounding box of all stitch points (in pixel coords)
+        all_points = [p for b in plan.blocks for p in b.points]
+        min_x = min(p.x for p in all_points)
+        max_x = max(p.x for p in all_points)
+        min_y = min(p.y for p in all_points)
+        max_y = max(p.y for p in all_points)
+
+        pixel_w = max(max_x - min_x, 1)
+        pixel_h = max(max_y - min_y, 1)
+
+        # SVG canvas: fit into 400x400 max, preserving aspect ratio
+        max_svg = 400
+        margin = 10
+        usable = max_svg - 2 * margin
+        scale = min(usable / pixel_w, usable / pixel_h)
+        svg_w = int(pixel_w * scale) + 2 * margin
+        svg_h = int(pixel_h * scale) + 2 * margin
 
         lines = [
-            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-            f'viewBox="0 0 {width} {height}">',
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" '
+            f'viewBox="0 0 {svg_w} {svg_h}">',
             f'<rect width="100%" height="100%" fill="white"/>',
         ]
 
@@ -95,13 +119,125 @@ class PatternGenerator:
                 p1, p2 = block.points[i - 1], block.points[i]
                 if p1.jump or p2.jump:
                     continue
-                x1, y1 = 10 + p1.x * scale, 10 + p1.y * scale
-                x2, y2 = 10 + p2.x * scale, 10 + p2.y * scale
-                lines.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
-                             f'stroke="{color_hex}" stroke-width="0.5" opacity="0.8"/>')
+                x1 = margin + (p1.x - min_x) * scale
+                y1 = margin + (p1.y - min_y) * scale
+                x2 = margin + (p2.x - min_x) * scale
+                y2 = margin + (p2.y - min_y) * scale
+                lines.append(
+                    f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                    f'stroke="{color_hex}" stroke-width="0.5" opacity="0.8"/>'
+                )
 
         lines.append("</svg>")
         Path(output_path).write_text("\n".join(lines))
+
+    def generate_preview_svg(self, plan: StitchPlan, output_path: str,
+                             regions: Optional[List[ImageRegion]] = None):
+        """Generate enhanced SVG preview with region fills and stitch lines.
+
+        If regions are provided, renders colored region shapes first,
+        then overlays stitch lines for a more realistic preview.
+        """
+        if not plan.blocks and not regions:
+            Path(output_path).write_text('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="100%" height="100%" fill="white"/></svg>')
+            return
+
+        # Compute bounding box from regions or stitch points
+        if regions:
+            all_x = []
+            all_y = []
+            for r in regions:
+                all_x.extend([r.bbox[0], r.bbox[2]])
+                all_y.extend([r.bbox[1], r.bbox[3]])
+            min_x, max_x = min(all_x), max(all_x)
+            min_y, max_y = min(all_y), max(all_y)
+        else:
+            all_points = [p for b in plan.blocks for p in b.points]
+            min_x = min(p.x for p in all_points)
+            max_x = max(p.x for p in all_points)
+            min_y = min(p.y for p in all_points)
+            max_y = max(p.y for p in all_points)
+
+        pixel_w = max(max_x - min_x, 1)
+        pixel_h = max(max_y - min_y, 1)
+
+        max_svg = 500
+        margin = 10
+        usable = max_svg - 2 * margin
+        scale = min(usable / pixel_w, usable / pixel_h)
+        svg_w = int(pixel_w * scale) + 2 * margin
+        svg_h = int(pixel_h * scale) + 2 * margin
+
+        lines = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" '
+            f'viewBox="0 0 {svg_w} {svg_h}">',
+            f'<rect width="100%" height="100%" fill="#f8f8f8"/>',
+        ]
+
+        # Render region fills from masks
+        if regions:
+            for region in regions:
+                if region.mask is None:
+                    continue
+                color_hex = region.color.hex if region.color else "#cccccc"
+                mask_h, mask_w = region.mask.shape
+                rx1, ry1 = region.bbox[0], region.bbox[1]
+
+                # Convert mask to SVG polygon paths (simplified: render filled rectangles per row)
+                for row_idx in range(0, mask_h, 2):  # skip every other row for performance
+                    row = region.mask[row_idx]
+                    col_indices = np.where(row)[0]
+                    if len(col_indices) == 0:
+                        continue
+                    # Find contiguous runs
+                    runs = self._find_mask_runs(col_indices)
+                    for start_col, end_col in runs:
+                        sx = margin + (rx1 + start_col - min_x) * scale
+                        sy = margin + (ry1 + row_idx - min_y) * scale
+                        sw = (end_col - start_col + 1) * scale
+                        sh = max(2 * scale, 1)
+                        lines.append(
+                            f'<rect x="{sx:.1f}" y="{sy:.1f}" width="{sw:.1f}" height="{sh:.1f}" '
+                            f'fill="{color_hex}" opacity="0.6"/>'
+                        )
+
+        # Overlay stitch lines
+        for block in plan.blocks:
+            if not block.points:
+                continue
+            color_hex = block.color.hex if block.color else "#000000"
+            for i in range(1, len(block.points)):
+                p1, p2 = block.points[i - 1], block.points[i]
+                if p1.jump or p2.jump:
+                    continue
+                x1 = margin + (p1.x - min_x) * scale
+                y1 = margin + (p1.y - min_y) * scale
+                x2 = margin + (p2.x - min_x) * scale
+                y2 = margin + (p2.y - min_y) * scale
+                lines.append(
+                    f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                    f'stroke="{color_hex}" stroke-width="0.3" opacity="0.5"/>'
+                )
+
+        lines.append("</svg>")
+        Path(output_path).write_text("\n".join(lines))
+
+    @staticmethod
+    def _find_mask_runs(col_indices: np.ndarray, gap: int = 2) -> List[Tuple[int, int]]:
+        """Find contiguous runs of column indices in a mask row."""
+        if len(col_indices) == 0:
+            return []
+        runs = []
+        start = int(col_indices[0])
+        prev = start
+        for c in col_indices[1:]:
+            c = int(c)
+            if c - prev > gap:
+                runs.append((start, prev))
+                start = c
+            prev = c
+        runs.append((start, prev))
+        return runs
 
     def _export_dst(self, plan: StitchPlan, output_path: str):
         """Export to Tajima DST format."""
@@ -160,6 +296,86 @@ class PatternGenerator:
         data.extend(b"\x80\x00")  # End
         Path(output_path).write_bytes(bytes(data))
 
-    def generate_preview_svg(self, plan: StitchPlan, output_path: str):
-        """Alias for SVG export."""
-        self._export_svg(plan, output_path)
+    def generate_preview_png(self, plan: StitchPlan, output_path: str,
+                             regions: Optional[List[ImageRegion]] = None,
+                             max_size: int = 500):
+        """Generate PNG preview with region fills and stitch lines.
+
+        Uses Pillow for rendering — guaranteed to work with st.image().
+        """
+        # Compute bounding box
+        if regions:
+            all_x, all_y = [], []
+            for r in regions:
+                all_x.extend([r.bbox[0], r.bbox[2]])
+                all_y.extend([r.bbox[1], r.bbox[3]])
+            min_x, max_x = min(all_x), max(all_x)
+            min_y, max_y = min(all_y), max(all_y)
+        elif plan.blocks:
+            all_points = [p for b in plan.blocks for p in b.points]
+            if not all_points:
+                # Empty — create placeholder
+                img = Image.new("RGB", (200, 200), (248, 248, 248))
+                img.save(output_path)
+                return
+            min_x = min(p.x for p in all_points)
+            max_x = max(p.x for p in all_points)
+            min_y = min(p.y for p in all_points)
+            max_y = max(p.y for p in all_points)
+        else:
+            img = Image.new("RGB", (200, 200), (248, 248, 248))
+            img.save(output_path)
+            return
+
+        pixel_w = max(max_x - min_x, 1)
+        pixel_h = max(max_y - min_y, 1)
+
+        margin = 10
+        usable = max_size - 2 * margin
+        scale = min(usable / pixel_w, usable / pixel_h)
+        img_w = int(pixel_w * scale) + 2 * margin
+        img_h = int(pixel_h * scale) + 2 * margin
+
+        img = Image.new("RGB", (img_w, img_h), (255, 255, 255))
+        draw = ImageDraw.Draw(img)
+
+        # Draw region fills
+        if regions:
+            for region in regions:
+                if region.mask is None:
+                    continue
+                color_rgb = region.color.rgb if region.color else (200, 200, 200)
+                mask_h, mask_w = region.mask.shape
+                rx1, ry1 = region.bbox[0], region.bbox[1]
+
+                # Render mask as filled pixels (downsample for performance)
+                step = max(1, int(1 / scale))
+                for row_idx in range(0, mask_h, step):
+                    row = region.mask[row_idx]
+                    col_indices = np.where(row)[0]
+                    if len(col_indices) == 0:
+                        continue
+                    runs = self._find_mask_runs(col_indices)
+                    for start_col, end_col in runs:
+                        sx = int(margin + (rx1 + start_col - min_x) * scale)
+                        sy = int(margin + (ry1 + row_idx - min_y) * scale)
+                        ex = int(margin + (rx1 + end_col + 1 - min_x) * scale)
+                        ey = int(margin + (ry1 + row_idx + step - min_y) * scale)
+                        draw.rectangle([sx, sy, ex, ey], fill=color_rgb)
+
+        # Draw stitch lines
+        for block in plan.blocks:
+            if not block.points:
+                continue
+            color_rgb = block.color.rgb if block.color else (0, 0, 0)
+            for i in range(1, len(block.points)):
+                p1, p2 = block.points[i - 1], block.points[i]
+                if p1.jump or p2.jump:
+                    continue
+                x1 = margin + (p1.x - min_x) * scale
+                y1 = margin + (p1.y - min_y) * scale
+                x2 = margin + (p2.x - min_x) * scale
+                y2 = margin + (p2.y - min_y) * scale
+                draw.line([(x1, y1), (x2, y2)], fill=color_rgb, width=1)
+
+        img.save(output_path)

@@ -12,6 +12,7 @@ Features:
 import sys
 import os
 from io import BytesIO
+from pathlib import Path
 
 # Fix path: on Streamlit Cloud, python/ is a subdirectory of the repo root
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -117,11 +118,20 @@ if mode == "Generate":
             st.warning("Agent not available. Running in demo mode.")
             st.info("Install pyembroidery and svgwrite for full functionality.")
         else:
-            # Show preview SVG
+            # Show preview PNG (st.image() doesn't support SVG)
             with col2:
-                preview = result.preview_svg
-                if preview and os.path.exists(preview):
-                    st.image(preview, caption="Stitch Preview", use_container_width=True)
+                preview_png = getattr(result, 'preview_png', '')
+                preview_svg = result.preview_svg
+                if preview_png and os.path.exists(preview_png):
+                    st.image(preview_png, caption="Stitch Preview", use_container_width=True)
+                elif preview_svg and os.path.exists(preview_svg):
+                    # Fallback: render SVG inline
+                    svg_content = Path(preview_svg).read_text(encoding="utf-8")
+                    st.markdown(
+                        f'<div style="text-align:center">{svg_content}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("Stitch Preview")
                 else:
                     st.info("Preview not available")
 

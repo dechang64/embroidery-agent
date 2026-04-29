@@ -27,6 +27,7 @@ class GenerationResult:
     stitch_plan: StitchPlan
     exports: List[ExportResult] = field(default_factory=list)
     preview_svg: str = ""
+    preview_png: str = ""
     regions_count: int = 0
     processing_time_ms: float = 0.0
     certificate: Optional[DesignCertificate] = None
@@ -86,7 +87,10 @@ class EmbroideryAgent:
         # 4. Export
         exports = self.generator.export_multi_format(plan, base_path, self.export_formats)
         preview_path = f"{base_path}_preview.svg"
-        self.generator.generate_preview_svg(plan, preview_path)
+        self.generator.generate_preview_svg(plan, preview_path, regions=processed.regions)
+        # Also generate PNG preview (st.image() doesn't support SVG)
+        preview_png_path = f"{base_path}_preview.png"
+        self.generator.generate_preview_png(plan, preview_png_path, regions=processed.regions)
 
         # 5. Audit certification
         certificate = None
@@ -104,6 +108,7 @@ class EmbroideryAgent:
         return GenerationResult(
             input_image=image_path, output_dir=output_dir,
             stitch_plan=plan, exports=exports, preview_svg=preview_path,
+            preview_png=preview_png_path,
             regions_count=len(processed.regions), processing_time_ms=elapsed_ms,
             certificate=certificate, style_hash=style_hash,
             similar_patterns=similar_patterns,
@@ -122,7 +127,7 @@ class EmbroideryAgent:
         plan = self.planner.plan(processed.regions, processed.color_palette)
         exports = self.generator.export_multi_format(plan, base_path, self.export_formats)
         preview_path = f"{base_path}_preview.svg"
-        self.generator.generate_preview_svg(plan, preview_path)
+        self.generator.generate_preview_svg(plan, preview_path, regions=processed.regions)
 
         elapsed_ms = (time.time() - start) * 1000
         return GenerationResult(input_image="<array>", output_dir=output_dir,

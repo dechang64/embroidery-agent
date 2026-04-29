@@ -5,7 +5,7 @@ Handles:
     - Image preprocessing (resize, normalize)
     - Edge detection (Canny, Sobel)
     - Color segmentation (K-means)
-    - Region extraction (contour detection, bounding boxes)
+    - Region extraction (connected components, contour detection)
     - Stitch type assignment based on region characteristics
 """
 
@@ -53,6 +53,7 @@ class ImageRegion:
     stitch_type: StitchType = StitchType.FILL
     priority: int = 50
     contour: List[Tuple[int, int]] = field(default_factory=list)
+    mask: Optional[np.ndarray] = None  # boolean mask (h, w), cropped to bbox
 
 
 @dataclass
@@ -84,7 +85,7 @@ class ImageProcessor:
         gray = np.array(image.convert("L"))
         edge_map = self._detect_edges(gray)
 
-        # Extract regions from segments
+        # Extract regions from segments (connected components per color)
         regions = self._extract_regions(segment_map, palette, (w, h))
 
         # Assign stitch types
@@ -99,22 +100,30 @@ class ImageProcessor:
         )
 
     def _kmeans_segment(self, img: np.ndarray) -> Tuple[List[EmbroideryColor], np.ndarray]:
-        """K-means color segmentation."""
+        """K-means color segmentation — memory-efficient chunked version."""
         pixels = img.reshape(-1, 3).astype(np.float32)
         n = len(pixels)
 
-        # Initialize centroids randomly
+        # Initialize centroids via K-means++ style
         rng = np.random.RandomState(42)
         indices = rng.choice(n, min(self.max_colors, n), replace=False)
         centroids = pixels[indices].copy()
 
         for _ in range(20):
-            # Assign pixels to nearest centroid
-            dists = np.linalg.norm(pixels[:, None] - centroids[None], axis=2)
-            labels = np.argmin(dists, axis=1)
+            # Chunked distance computation to avoid O(N*K*3) memory blowup
+            labels = np.empty(n, dtype=np.int32)
+            chunk_size = 50000
+            for start in range(0, n, chunk_size):
+                end = min(start + chunk_size, n)
+                chunk = pixels[start:end]
+                dists = np.linalg.norm(chunk[:, None] - centroids[None], axis=2)
+                labels[start:end] = np.argmin(dists, axis=1)
 
             # Update centroids
-            new_centroids = np.array([pixels[labels == k].mean(axis=0) if (labels == k).any() else centroids[k] for k in range(len(centroids))])
+            new_centroids = np.array([
+                pixels[labels == k].mean(axis=0) if (labels == k).any() else centroids[k]
+                for k in range(len(centroids))
+            ])
             if np.allclose(centroids, new_centroids, atol=1e-3):
                 break
             centroids = new_centroids
@@ -141,37 +150,54 @@ class ImageProcessor:
 
     def _extract_regions(self, segment_map: np.ndarray, palette: List[EmbroideryColor],
                          size: Tuple[int, int]) -> List[ImageRegion]:
-        """Extract connected regions from segment map."""
+        """Extract connected regions from segment map using scipy.ndimage.label."""
+        from scipy.ndimage import label as ndlabel
+
         regions = []
         h, w = segment_map.shape
-        visited = np.zeros_like(segment_map, dtype=bool)
         region_id = 0
 
         for label_idx in range(len(palette)):
-            mask = segment_map == label_idx
-            if mask.sum() < self.min_region_area:
+            color_mask = segment_map == label_idx
+            if color_mask.sum() < self.min_region_area:
                 continue
 
-            # Simple contour extraction
-            ys, xs = np.where(mask)
-            x1, x2 = int(xs.min()), int(xs.max())
-            y1, y2 = int(ys.min()), int(ys.max())
-            area = int(mask.sum())
-            cx, cy = int(xs.mean()), int(ys.mean())
+            # Skip near-white background (avg brightness > 240)
+            rgb = palette[label_idx].rgb
+            if sum(rgb) / 3 > 240:
+                continue
 
-            # Extract boundary pixels as contour
-            contour = self._extract_contour(mask)
+            # Split this color into connected components
+            labeled, num_components = ndlabel(color_mask)
 
-            region = ImageRegion(
-                region_id=region_id,
-                bbox=(x1, y1, x2, y2),
-                area=area,
-                centroid=(cx, cy),
-                color=palette[label_idx],
-                contour=contour,
-            )
-            regions.append(region)
-            region_id += 1
+            for comp_id in range(1, num_components + 1):
+                comp_mask = labeled == comp_id
+                area = int(comp_mask.sum())
+                if area < self.min_region_area:
+                    continue
+
+                ys, xs = np.where(comp_mask)
+                x1, x2 = int(xs.min()), int(xs.max())
+                y1, y2 = int(ys.min()), int(ys.max())
+                cx, cy = int(xs.mean()), int(ys.mean())
+
+                # Crop mask to bbox for efficient storage
+                cropped_mask = comp_mask[y1:y2 + 1, x1:x2 + 1].copy()
+
+                # Extract boundary pixels as contour
+                contour = self._extract_contour(comp_mask)
+
+                region = ImageRegion(
+                    region_id=region_id,
+                    bbox=(x1, y1, x2, y2),
+                    area=area,
+                    centroid=(cx, cy),
+                    color=palette[label_idx],
+                    contour=contour,
+                    mask=cropped_mask,
+                )
+                regions.append(region)
+                region_id += 1
 
         return regions
 

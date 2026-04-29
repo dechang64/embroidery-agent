@@ -12,6 +12,7 @@ Features:
 import sys
 import os
 from io import BytesIO
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "python"))
 
@@ -82,8 +83,8 @@ _tmpdir = st.session_state._tmpdir
 
 if "agent" not in st.session_state:
     st.session_state.agent = EmbroideryAgent(
-        audit_db_path=os.path.join(_tmpdir, "audit.db"),
-        pattern_library_path=os.path.join(_tmpdir, "patterns.json"),
+        audit_db=os.path.join(_tmpdir, "audit.db"),
+        pattern_db=os.path.join(_tmpdir, "patterns.json"),
     )
 if "audit" not in st.session_state:
     st.session_state.audit = AuditCertifier(db_path=os.path.join(_tmpdir, "audit.db"))
@@ -119,10 +120,18 @@ if mode == "Generate":
             st.error("Generation failed — core library not available.")
         else:
             with col2:
-                # preview_svg is already an absolute path from agent.generate
-                svg_path = result.preview_svg
-                if svg_path and os.path.exists(svg_path):
-                    st.image(svg_path, caption="Stitch Preview", use_container_width=True)
+                # Show preview PNG (st.image() doesn't support SVG)
+                preview_png = getattr(result, 'preview_png', '')
+                preview_svg = result.preview_svg
+                if preview_png and os.path.exists(preview_png):
+                    st.image(preview_png, caption="Stitch Preview", use_container_width=True)
+                elif preview_svg and os.path.exists(preview_svg):
+                    svg_content = Path(preview_svg).read_text(encoding="utf-8")
+                    st.markdown(
+                        f'<div style="text-align:center">{svg_content}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.caption("Stitch Preview")
                 else:
                     st.info("No preview available.")
 
