@@ -84,8 +84,8 @@ _tmpdir = st.session_state._tmpdir
 
 if "agent" not in st.session_state:
     st.session_state.agent = EmbroideryAgent(
-        audit_db_path=os.path.join(_tmpdir, "audit.db"),
-        pattern_library_path=os.path.join(_tmpdir, "patterns.json"),
+        audit_db=os.path.join(_tmpdir, "audit.db"),
+        pattern_db=os.path.join(_tmpdir, "patterns.json"),
     )
 if "audit" not in st.session_state:
     st.session_state.audit = AuditCertifier(db_path=os.path.join(_tmpdir, "audit.db"))
