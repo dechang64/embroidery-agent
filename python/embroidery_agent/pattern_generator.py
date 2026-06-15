@@ -11,7 +11,6 @@ Uses pyembroidery for format encoding.
 """
 from __future__ import annotations
 
-import pyembroidery
 from typing import List
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +56,7 @@ class PatternGenerator:
         Returns:
             ExportResult with metadata
         """
+        import pyembroidery
         # Build pyembroidery pattern
         pattern = pyembroidery.EmbPattern()
 
