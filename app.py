@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Embroidery Agent — 刺绣针迹自动生成系统
 Streamlit Cloud App
