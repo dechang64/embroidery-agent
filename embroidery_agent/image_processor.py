@@ -8,7 +8,6 @@ Handles:
     - Region extraction (contour detection, bounding boxes)
 """
 
-from __future__ import annotations
 import numpy as np
 from PIL import Image, ImageFilter, ImageDraw
 from typing import List, Tuple, Optional, Dict, Any

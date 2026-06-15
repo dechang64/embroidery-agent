@@ -13,7 +13,6 @@ Use cases:
     - Multi-workshop pattern sharing (federated pattern library)
 """
 
-from __future__ import annotations
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, field

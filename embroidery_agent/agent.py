@@ -11,7 +11,6 @@ Usage:
     result = agent.generate("input.png", output_dir="./output")
 """
 
-from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field

@@ -10,7 +10,6 @@ Generates standard embroidery machine file formats:
 Uses pyembroidery for format encoding.
 """
 
-from __future__ import annotations
 import pyembroidery
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
