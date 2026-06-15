@@ -1,0 +1,5 @@
+streamlit>=1.40.0
+Pillow>=10.0
+numpy>=1.24
+pyembroidery>=1.5
+svgwrite>=1.4
