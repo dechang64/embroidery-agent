@@ -1,0 +1,36 @@
+
+# Database
+# Environment
+# Generated outputs
+# IDE
+# Model weights & checkpoints
+# OS
+# Python
+*.bin
+*.ckpt
+*.db
+*.dst
+*.egg-info
+*.egg-info/
+*.h5
+*.npz
+*.pkl
+*.pt
+*.pth
+*.pyc
+*.pyo
+*.safetensors
+*.svg
+*.swo
+*.swp
+.DS_Store
+.env
+.idea/
+.venv/
+.vscode/
+Thumbs.db
+__pycache__/
+build/
+dist/
+output/
+venv/
