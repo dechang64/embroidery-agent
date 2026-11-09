@@ -169,7 +169,7 @@ class PatternLibrary:
         return pattern.pattern_id
 
     def search(self, query_vector: np.ndarray, k: int = 5,
-               min_similarity: float = 0.0) -> List[Tuple[str, float]]:
+               min_similarity: float = -1.0) -> List[Tuple[str, float]]:
         """Search for similar patterns.
 
         Args:

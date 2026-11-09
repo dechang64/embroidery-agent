@@ -228,7 +228,7 @@ class StitchPlanner:
             line_points = []
             for y in range(0, h, step_px):
                 x = int((offset - y * sin_a) / cos_a) if abs(cos_a) > 0.01 else 0
-                if 0 <= x < w and mask[y, x] == 1:
+                if 0 <= x < w and mask[y, x] > 0:
                     line_points.append((x, y))
 
             # Add points where line is inside mask
@@ -255,7 +255,7 @@ class StitchPlanner:
             # Offset every other row for tatami pattern
             offset = (step_px // 2) * row_offset
             for x in range(offset, w, step_px):
-                if mask[y, x] == 1:
+                if mask[y, x] > 0:
                     points.append(StitchPoint(
                         x=self._px_to_mm(x), y=self._px_to_mm(y),
                         stitch_type=StitchType.TATAMI,
